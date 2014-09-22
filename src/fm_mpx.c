@@ -29,7 +29,6 @@
 #include <strings.h>
 #include <math.h>
 
-#include "rds.h"
 
 
 #define PI 3.141592654
@@ -160,7 +159,7 @@ int fm_mpx_open(char *filename, size_t len) {
 // samples provided by this function are in 0..10: they need to be divided by
 // 10 after.
 int fm_mpx_get_samples(float *mpx_buffer) {
-    get_rds_samples(mpx_buffer, length);
+    //get_rds_samples(mpx_buffer, length);
 
     if(inf  == NULL) return 0; // if there is no audio, stop here
     
@@ -194,13 +193,13 @@ int fm_mpx_get_samples(float *mpx_buffer) {
         
         // First store the current sample(s) into the FIR filter's ring buffer
         if(channels == 0) {
-            fir_buffer_mono[fir_index] = audio_buffer[audio_index];
+            fir_buffer_mono[fir_index] = 1. * audio_buffer[audio_index];
         } else {
             // In stereo operation, generate sum and difference signals
-            fir_buffer_mono[fir_index] = 
-                audio_buffer[audio_index] + audio_buffer[audio_index+1];
-            fir_buffer_stereo[fir_index] = 
-                audio_buffer[audio_index] - audio_buffer[audio_index+1];
+			fir_buffer_mono[fir_index] = 1.*(
+                audio_buffer[audio_index] + audio_buffer[audio_index+1]);
+			fir_buffer_stereo[fir_index] = 1.*(
+                audio_buffer[audio_index] - audio_buffer[audio_index+1]);
         }
         fir_index++;
         if(fir_index >= FIR_SIZE) fir_index = 0;
@@ -233,13 +232,13 @@ int fm_mpx_get_samples(float *mpx_buffer) {
         
 
         mpx_buffer[i] = 
-            mpx_buffer[i] +    // RDS data samples are currently in mpx_buffer
+            //mpx_buffer[i] +    // RDS data samples are currently in mpx_buffer
             4.05*out_mono;     // Unmodulated monophonic (or stereo-sum) signal
             
         if(channels>1) {
             mpx_buffer[i] +=
                 4.05 * carrier_38[phase_38] * out_stereo + // Stereo difference signal
-                .9*carrier_19[phase_19];                  // Stereo pilot tone
+                .83*carrier_19[phase_19];                  // Stereo pilot tone
 
             phase_19++;
             phase_38++;
@@ -247,6 +246,8 @@ int fm_mpx_get_samples(float *mpx_buffer) {
             if(phase_38 >= 6) phase_38 = 0;
         }
             
+		mpx_buffer[i] *= 1.;
+
         audio_pos++;   
         
     }

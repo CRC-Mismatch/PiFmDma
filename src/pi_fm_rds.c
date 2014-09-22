@@ -1,8 +1,15 @@
 /*
- * PiFmRds - FM/RDS transmitter for the Raspberry Pi
+ * PiFmDma - FM transmitter for the Raspberry Pi
+ * Copyright (C) 2014 CRC-Mismatch
  * Copyright (C) 2014 Christophe Jacquet, F8FTK
  * Copyright (C) 2012 Richard Hirst
  * Copyright (C) 2012 Oliver Mattos and Oskar Weigl
+ *
+ * The credit for this goes to Christoph Jacquet. I only took his correctly
+ * functioning solution (in my opinion also the best one available) and
+ * modified it for better sound quality (namely sacrificing RDS in order
+ * to obtain such). I intend to continually improve, and if possible,
+ * also contribute to the original PiFmRds project with my findings.
  *
  * See https://github.com/ChristopheJacquet/PiFmRds
  *
@@ -99,9 +106,7 @@
 #include <sys/mman.h>
 #include <sndfile.h>
 
-#include "rds.h"
 #include "fm_mpx.h"
-#include "control_pipe.h"
 
 
 #define NUM_SAMPLES        50000
@@ -206,8 +211,7 @@ terminate(int dummy)
     }
     
     fm_mpx_close();
-    close_control_pipe();
-    
+
     exit(1);
 }
 
@@ -269,7 +273,7 @@ map_peripheral(uint32_t base, uint32_t len)
 #define DATA_SIZE 5000
 
 
-int tx(uint32_t carrier_freq, char *audio_file, uint16_t pi, char *ps, char *rt, float ppm, char *control_pipe) {
+int tx(uint32_t carrier_freq, char *audio_file, float ppm) {
     int i, fd, pid;
     char pagemap_fn[64];
 
@@ -419,57 +423,13 @@ int tx(uint32_t carrier_freq, char *audio_file, uint16_t pi, char *ps, char *rt,
     int data_index = 0;
 
     // Initialize the baseband generator
-    if(fm_mpx_open(audio_file, DATA_SIZE) < 0) return -1;
-    
-    // Initialize the RDS modulator
-    char myps[9] = {0};
-    set_rds_pi(pi);
-    set_rds_rt(rt);
-    uint16_t count = 0;
-    uint16_t count2 = 0;
-    int varying_ps = 0;
-    
-    if(ps) {
-        set_rds_ps(ps);
-        printf("PI: %04X, PS: \"%s\"\n", pi, ps);
-    } else {
-        printf("PI: %04X, PS: <Varying>\n", pi);
-        varying_ps = 1;
-    }
-    printf("RT: \"%s\"\n", rt);
-    
-    // Initialize the control pipe reader
-    if(control_pipe) {
-        if(open_control_pipe(control_pipe) == 0) {
-            printf("Reading control commands on %s.\n", control_pipe);
-        } else {
-            printf("Failed to open control pipe: %s.\n", control_pipe);
-            control_pipe = NULL;
-        }
-    }
-    
-    
+	if (fm_mpx_open(audio_file, DATA_SIZE) < 0) {
+		terminate(0);
+		return -1;
+	}
     printf("Starting to transmit on %3.1f MHz.\n", carrier_freq/1e6);
 
-    for (;;) {
-        // Default (varying) PS
-        if(varying_ps) {
-            if(count == 512) {
-                snprintf(myps, 9, "%08d", count2);
-                set_rds_ps(myps);
-                count2++;
-            }
-            if(count == 1024) {
-                set_rds_ps("RPi-Live");
-                count = 0;
-            }
-            count++;
-        }
-        
-        if(control_pipe && poll_control_pipe() == CONTROL_PIPE_PS_SET) {
-            varying_ps = 0;
-        }
-        
+	for (;;) {
         usleep(5000);
 
         uint32_t cur_cb = mem_phys_to_virt(dma_reg[DMA_CONBLK_AD]);
@@ -507,7 +467,7 @@ int tx(uint32_t carrier_freq, char *audio_file, uint16_t pi, char *ps, char *rt,
         last_cb = (uint32_t)virtbase + last_sample * sizeof(dma_cb_t) * 2;
     }
 
-    terminate(0);
+	terminate(0);
 
     return 0;
 }
@@ -515,11 +475,7 @@ int tx(uint32_t carrier_freq, char *audio_file, uint16_t pi, char *ps, char *rt,
 
 int main(int argc, char **argv) {
     char *audio_file = NULL;
-    char *control_pipe = NULL;
     uint32_t carrier_freq = 107900000;
-    char *ps = NULL;
-    char *rt = "PiFmRds: live FM-RDS transmission from the RaspberryPi";
-    uint16_t pi = 0x1234;
     float ppm = 0;
     
     
@@ -538,27 +494,14 @@ int main(int argc, char **argv) {
             carrier_freq = 1e6 * atof(param);
             if(carrier_freq < 87500000 || carrier_freq > 108000000)
                 fatal("Incorrect frequency specification. Must be in megahertz, of the form 107.9\n");
-        } else if(strcmp("-pi", arg)==0 && param != NULL) {
-            i++;
-            pi = (uint16_t) strtol(param, NULL, 16);
-        } else if(strcmp("-ps", arg)==0 && param != NULL) {
-            i++;
-            ps = param;
-        } else if(strcmp("-rt", arg)==0 && param != NULL) {
-            i++;
-            rt = param;
         } else if(strcmp("-ppm", arg)==0 && param != NULL) {
             i++;
             ppm = atof(param);
-        } else if(strcmp("-ctl", arg)==0 && param != NULL) {
-            i++;
-            control_pipe = param;
         } else {
             fatal("Unrecognised argument: %s\n"
-            "Syntax: pi_fm_rds [-freq freq] [-audio file] [-ppm ppm_error] [-pi pi_code]\n"
-            "                  [-ps ps_text] [-rt rt_text] [-ctl control_pipe]\n", arg);
+            "Syntax: pi_fm_rds [-freq freq] [-audio file] [-ppm ppm_error]\n", arg);
         }
     }
-    
-    tx(carrier_freq, audio_file, pi, ps, rt, ppm, control_pipe);
+	udelay(100000);
+    tx(carrier_freq, audio_file, ppm);
 }
